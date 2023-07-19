@@ -1,8 +1,10 @@
+def branch = "main"
 def repo = "https://github.com/Zafa23/wayshub-frontend.git"
-def dir = "wayshub-frontend"
+def cred = "appserver"
+def dir = "~/wayshub-frontend"
+def server = "zafar@103.82.92.255"
 def imagename = "wayshub-fe"
 def dockerusername = "zafarassidiq"
-def dockerpassword = "Zafar250104"
 
 pipeline {
     agent any
@@ -10,28 +12,56 @@ pipeline {
     stages {
         stage('Pull From Repository') {
             steps {
-                checkout([$class: 'GitSCM', branches: [[name: '*/main']], userRemoteConfigs: [[url: "${repo}"]]])
+                sshagent([cred]) {
+                    sh """ssh -o StrictHostKeyChecking=no ${server} << EOF
+                        cd ${dir}
+                        git remote add origin ${repo} || git remote set-url origin ${repo}
+                        git pull origin ${branch}
+                        exit
+                        EOF
+                    """
+                }
             }
         }
 
         stage('Dockerize') {
             steps {
-                sh "docker build -t ${imagename}:latest ${dir}"
+                sshagent([cred]) {
+                    sh """ssh -o StrictHostKeyChecking=no ${server} << EOF
+                        cd ${dir}
+                        docker build -t ${imagename}:latest .
+                        exit
+                        EOF
+                    """
+                }
             }
         }
 
         stage('Deploy Docker') {
             steps {
-                sh "docker run -d -p 80:80 --name=${imagename} ${imagename}:latest"
+                sshagent([cred]) {
+                    sh """ssh -o StrictHostKeyChecking=no ${server} << EOF
+                        cd ${dir}
+                        docker stop ${imagename} || true
+                        docker rm ${imagename} || true
+                        docker run -d -p 3000:3000 --name=${imagename} ${imagename}:latest
+                        exit
+                        EOF
+                    """
+                }
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
-                withDockerRegistry(credentialsId: 'dockerhub-credentials', url: '') {
-                    sh "docker login -u ${dockerusername} -p ${dockerpassword}"
-                    sh "docker tag ${imagename}:latest ${dockerusername}/${imagename}:latest"
-                    sh "docker push ${dockerusername}/${imagename}:latest"
+                sshagent([cred]) {
+                    sh """ssh -o StrictHostKeyChecking=no ${server} << EOF
+                        docker tag ${imagename}:latest ${dockerusername}/${imagename}:latest
+                        docker login -u ${dockerusername} -p DOCKER_PASSWORD
+                        docker push ${dockerusername}/${imagename}:latest
+                        exit
+                        EOF
+                    """
                 }
             }
         }
